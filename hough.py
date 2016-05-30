@@ -57,79 +57,6 @@ def line_by_points(m, t):
 	b = -slope*tx + ty
 	return (slope, b)
 
-# one step of RHT algortihm, given 3 random points in pts
-def rht_ellipse_step(img, pts):
-	x1,y1 = pts[0][0], pts[0][1]
-	x2,y2 = pts[1][0], pts[1][1]
-	x3,y3 = pts[2][0], pts[2][1]
-	try:
-		m1, b1 = ls_fit_line(img, x1, y1)
-		m2, b2 = ls_fit_line(img, x2, y2)
-		m3, b3 = ls_fit_line(img, x3, y3)
-
-		t12 = intersection((m1, b1), (m2, b2))
-		t23 = intersection((m2, b2), (m3, b3))
-		m12x = (x1 + x2)/2
-		m12y = (y1 + y2)/2
-		m23x = (x2 + x3)/2
-		m23y = (y2 + y3)/2
-
-		bisector12 = line_by_points(t12, (m12x, m12y))
-		bisector23 = line_by_points(t23, (m23x, m23y))
-		#draw_line(*bisector12)
-		#draw_line(*bisector23)
-		# x,y - center of ellipse
-		x,y = intersection(bisector23, bisector12)
-		#cv2.circle(original, (int(x), int(y)), 15, (0, 255, 90))
-		x1 -= x
-		x2 -= x
-		x3 -= x
-		y1 -= y
-		y2 -= y
-		y3 -= y
-		# x1..x3, y1..y3 translated to the origin of ellipse
-		a, b, c = np.linalg.solve([
-			[x1*x1, 2*x1*y1, y1*y1], 
-			[x2*x2, 2*x2*y2, y2*y2], 
-			[x3*x3, 2*x3*y3, y3*y3]
-			], [1, 1, 1])
-		if 4*a*c > b*b:
-			#r1 = np.sqrt(1.0/a)
-			#r2 = np.sqrt(1.0/c)
-			
-			theta = 0.5*np.arctan(b/(a-c))
-			tgTheta = np.tan(theta)
-			r1 = 1/np.sqrt(abs((a - c*tgTheta)/(1 - tgTheta*tgTheta)))
-			r2 = 1/np.sqrt(abs(a + c - 1/r1/r1))
-			# cv2.ellipse(original, (int(x),int(y)), (int(r1), int(r2)), theta*180/np.pi, 0, 360, (0, 0, 160))
-			return (x,y, r1, r2, theta*180/np.pi)
-		else:
-			return None
-	except ZeroDivisionError:
-		return None
-	except np.linalg.linalg.LinAlgError:
-		return None
-
-def rht_ellipses(img, steps, tolerance=4):
-	accum = EllipseAccum(tolerance)
-	
-	points = []
-	it = np.nditer(img, flags=["multi_index"])
-	while not it.finished:
-		if it[0] > 0:
-			points.append((it.multi_index[1], it.multi_index[0]))
-		it.iternext()
-	for i in xrange(steps):
-		sample = random.sample(points, 3)
-		e = rht_ellipse_step(img, sample)
-		if e:
-			accum.accumulate(e)
-
-	for v in accum.found():
-		x,y,r1,r2,theta = v
-		cv2.ellipse(original, (int(x),int(y)), (int(r1), int(r2)), 0, 0, 360, (0, 0, 255))
-		print v
-
 class Accumulator:
 	
 	def __init__(self):
@@ -179,16 +106,21 @@ class Accumulator:
 			return None
 
 	# generator over all detected curves
-	def __call__(self, img):
+	def __call__(self, img, points=None):
 		# Get points
 		self.accum = {}
-		self.points = []
-		for y,x in np.transpose(np.nonzero(img)):
-			self.points.append((x,y))
-
+		if points != None:
+			self.points = points
+		else:
+			self.points = []
+			it = np.nditer(img, flags=["multi_index"])
+			while not it.finished:
+				if it[0] > 0:
+					self.points.append((it.multi_index[1], it.multi_index[0]))
+				it.iternext()
 		# iterate across epouchs
 		for i in xrange(self.epouchs):
-			accum = {}
+			self.accum = {}
 			for j in xrange(self.iters):
 				sample = random.sample(self.points, self.sample_size)
 				curve = self.fit_curve(img, sample)
@@ -207,28 +139,91 @@ class Accumulator:
 
 class EllipseAccum(Accumulator):
 
-	def __init__(self, tolerance):
+	def __init__(self, epouchs=10, iters=100, key_tolerance=4, curve_tolerance=0.01, threshold=2, min_curve=12):
 		self.accum = {}
-		self.thrd = 2
-		self.tol = tolerance
+		self.thrd = threshold
+		self.min_curve = min_curve
+		self.epouchs = epouchs
+		self.iters = iters
+		self.sample_size = 3
+		self.tol = key_tolerance
+		self.on_curve_tol = curve_tolerance
 
 	def key_for(self, params):
 		return int(params[0])/self.tol, int(params[1])/self.tol, int(params[2])/self.tol,int(params[3])/self.tol
 
-	def fit_curve(self, img, sample):
-		pass
+	def fit_curve(self, img, pts):
+		# one step of RHT algortihm, given 3 random points in pts
+		x1,y1 = pts[0][0], pts[0][1]
+		x2,y2 = pts[1][0], pts[1][1]
+		x3,y3 = pts[2][0], pts[2][1]
+		try:
+			m1, b1 = ls_fit_line(img, x1, y1)
+			m2, b2 = ls_fit_line(img, x2, y2)
+			m3, b3 = ls_fit_line(img, x3, y3)
+			t12 = intersection((m1, b1), (m2, b2))
+			t23 = intersection((m2, b2), (m3, b3))
+
+			m12x = (x1 + x2)/2
+			m12y = (y1 + y2)/2
+			m23x = (x2 + x3)/2
+			m23y = (y2 + y3)/2
+
+			bisector12 = line_by_points(t12, (m12x, m12y))
+			bisector23 = line_by_points(t23, (m23x, m23y))
+			#draw_line(*bisector12)
+			#draw_line(*bisector23)
+			# x,y - center of ellipse
+			x,y = intersection(bisector23, bisector12)
+			#cv2.circle(original, (int(x), int(y)), 15, (0, 255, 90))
+			x1 -= x
+			x2 -= x
+			x3 -= x
+			y1 -= y
+			y2 -= y
+			y3 -= y
+			# x1..x3, y1..y3 translated to the origin of ellipse
+			a, b, c = np.linalg.solve([
+				[x1*x1, 2*x1*y1, y1*y1], 
+				[x2*x2, 2*x2*y2, y2*y2], 
+				[x3*x3, 2*x3*y3, y3*y3]
+				], [1, 1, 1])
+			if 4*a*c > b*b:
+				#r1 = np.sqrt(1.0/a)
+				#r2 = np.sqrt(1.0/c)
+				
+				theta = 0.5*np.arctan(b/(a-c))
+				tgTheta = np.tan(theta)
+				r1 = 1/np.sqrt(abs((a - c*tgTheta)/(1 - tgTheta*tgTheta)))
+				r2 = 1/np.sqrt(abs(a + c - 1/r1/r1))
+				# cv2.ellipse(original, (int(x),int(y)), (int(r1), int(r2)), theta*180/np.pi, 0, 360, (0, 0, 160))
+				return (x,y, r1, r2, theta*180/np.pi)
+			else:
+				return None
+		except ZeroDivisionError:
+			return None
+		except np.linalg.linalg.LinAlgError:
+			return None
+
+	def on_curve(self, curve, p):
+		x,y = p
+		x0,y0,a,b,theta = curve
+		# TODO: account for theta
+		if abs((x-x0)*(x-x0)/(a*a) + (y-y0)*(y-y0)/(b*b) - 1.0) < self.on_curve_tol:
+			return True
+		return False
 
 
 class LinesAccum(Accumulator):
 
-	def __init__(self, epouchs=10, iters=100, tolerance=1, threshold=2, min_curve=12):
+	def __init__(self, epouchs=10, iters=100, key_tolerance=1, curve_tolerance=1, threshold=2, min_curve=12):
 		self.thrd = threshold
 		self.sample_size = 2
 		self.min_curve = min_curve
-		self.tol = tolerance
+		self.tol = key_tolerance
 		self.epouchs = epouchs
 		self.iters = iters
-		self.on_curve_tol = tolerance
+		self.on_curve_tol = curve_tolerance
 
 	def key_for(self, params):
 		if params[0] == float('inf'):
@@ -256,14 +251,17 @@ class LinesAccum(Accumulator):
 			return True
 		return False
 
-lines = LinesAccum(epouchs=50, iters=100, tolerance=2, min_curve=16)
-for (m,b) in lines(img):
+lines = LinesAccum(epouchs=45, iters=150, key_tolerance=2, min_curve=25)
+for m,b in lines(img):
 	if m != float('inf'):
 		cv2.line(original, (int(0), int(b)), (int(800), int(800*m+b)), (0, 255, 0))
 	else:
 		cv2.line(original, (int(b), 0), (int(b), int(600)), (0, 255, 0))
 
-# rht_ellipses(img, 2000)
+ellipses = EllipseAccum(epouchs=8, iters=2000, key_tolerance=10, min_curve=10)
+# Use points filtered for lines
+for x,y,r1,r2,theta in ellipses(img, lines.points):
+	cv2.ellipse(original, (int(x),int(y)), (int(r1), int(r2)), 0, 0, 360, (0, 0, 255))
 
 #cv2.imshow('After canny + filter', img)
 #cv2.waitKey(0)
