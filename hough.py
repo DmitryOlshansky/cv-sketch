@@ -183,11 +183,9 @@ class Accumulator:
 		# Get points
 		self.accum = {}
 		self.points = []
-		it = np.nditer(img, flags=["multi_index"])
-		while not it.finished:
-			if it[0] > 0:
-				self.points.append((it.multi_index[1], it.multi_index[0]))
-			it.iternext()
+		for y,x in np.transpose(np.nonzero(img)):
+			self.points.append((x,y))
+
 		# iterate across epouchs
 		for i in xrange(self.epouchs):
 			accum = {}
@@ -258,7 +256,7 @@ class LinesAccum(Accumulator):
 			return True
 		return False
 
-lines = LinesAccum(epouchs=50, iters=100, tolerance=2)
+lines = LinesAccum(epouchs=50, iters=100, tolerance=2, min_curve=16)
 for (m,b) in lines(img):
 	if m != float('inf'):
 		cv2.line(original, (int(0), int(b)), (int(800), int(800*m+b)), (0, 255, 0))
