@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import random
 
-original = cv2.imread('img.jpg', 3)
+original = cv2.imread('img2.jpg', 3)
 img = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
 img = cv2.blur(img, (3,3))
 img = cv2.Canny(img, 120, 200)
@@ -130,8 +130,8 @@ class Accumulator:
 			if curve != None:
 				new_points = filter(lambda p: not self.on_curve(curve, p), self.points)
 				# test for sufficient amount of removed points
+				print curve, len(self.points) - len(new_points)
 				if len(self.points) - len(new_points) > self.min_curve:
-					print curve, len(self.points) - len(new_points)
 					yield curve
 					self.points = new_points
 		raise StopIteration
@@ -192,10 +192,14 @@ class EllipseAccum(Accumulator):
 				#r1 = np.sqrt(1.0/a)
 				#r2 = np.sqrt(1.0/c)
 				
-				theta = 0.5*np.arctan(b/(a-c))
-				tgTheta = np.tan(theta)
-				r1 = 1/np.sqrt(abs((a - c*tgTheta)/(1 - tgTheta*tgTheta)))
-				r2 = 1/np.sqrt(abs(a + c - 1/r1/r1))
+				theta = 0.5*np.arctan(2*b/(a-c))
+				tgTheta2 = np.tan(theta)
+				tgTheta2 *= tgTheta2
+				# print tgTheta2
+				r1 = np.sqrt(abs((1 - tgTheta2)/(a - c*tgTheta2)))
+				r2 = np.sqrt(abs((1 - tgTheta2)/(c - a*tgTheta2)))
+				if r1 == float('inf') or r2 == float('inf'):
+					return None
 				# cv2.ellipse(original, (int(x),int(y)), (int(r1), int(r2)), theta*180/np.pi, 0, 360, (0, 0, 160))
 				return (x,y, r1, r2, theta*180/np.pi)
 			else:
@@ -213,6 +217,39 @@ class EllipseAccum(Accumulator):
 			return True
 		return False
 
+class CirclesAccum(Accumulator):
+
+	def __init__(self, epouchs=10, iters=100, key_tolerance=2, curve_tolerance=4, threshold=2, min_curve=12):
+		self.thrd = threshold
+		self.sample_size = 3
+		self.min_curve = min_curve
+		self.tol = key_tolerance
+		self.epouchs = epouchs
+		self.iters = iters
+		self.on_curve_tol = curve_tolerance
+
+	def key_for(self, params):
+		return int(params[0])/self.tol, int(params[1])/self.tol, int(params[2])/self.tol
+
+	def fit_curve(self, img, sample):
+		try:
+			x1,y1 = sample[0]
+			x2,y2 = sample[1]
+			x3,y3 = sample[2]
+			ynorm =  (y2*y2 - y3*y3)*(x2 - x1)/2 + (x3-x2)*(y2*y2-y1*y1)/2 + (x1 - x3)*(y2 - y3)*(x2- x1) 
+			y = ynorm / ((y2 - y3)*(x2 - x1) + (x3-x2)*(y2-y1))
+			x = (y1 - y2)*(2*y - y1 - y2)/(x2 - x1)/2 + (x1+x2)/2
+			R = np.sqrt(pow(x-x1,2) + pow(y-y1,2))
+			return (x,y,R)
+		except ZeroDivisionError:
+			return None
+
+	def on_curve(self, curve, point):
+		x,y = point
+		x0,y0,R = curve
+		if abs((x-x0)*(x-x0) + (y-y0)*(y-y0) - R*R) < self.on_curve_tol*self.on_curve_tol:
+			return True
+		return False
 
 class LinesAccum(Accumulator):
 
@@ -251,17 +288,21 @@ class LinesAccum(Accumulator):
 			return True
 		return False
 
-lines = LinesAccum(epouchs=45, iters=150, key_tolerance=2, min_curve=25)
+lines = LinesAccum(epouchs=45, iters=200, key_tolerance=2, min_curve=25)
 for m,b in lines(img):
 	if m != float('inf'):
 		cv2.line(original, (int(0), int(b)), (int(800), int(800*m+b)), (0, 255, 0))
 	else:
 		cv2.line(original, (int(b), 0), (int(b), int(600)), (0, 255, 0))
 
-ellipses = EllipseAccum(epouchs=8, iters=2000, key_tolerance=10, min_curve=10)
+circles = CirclesAccum(epouchs=10, iters=10000, key_tolerance=10, min_curve=10)
+for x,y,r in circles(img, lines.points):
+	cv2.circle(original, (int(x),int(y)), int(r), (255, 0, 0))
+
+ellipses = EllipseAccum(epouchs=8, iters=6000, key_tolerance=10, min_curve=10)
 # Use points filtered for lines
 for x,y,r1,r2,theta in ellipses(img, lines.points):
-	cv2.ellipse(original, (int(x),int(y)), (int(r1), int(r2)), 0, 0, 360, (0, 0, 255))
+	cv2.ellipse(original, (int(x),int(y)), (int(r1), int(r2)), theta, 0, 360, (0, 0, 255))
 
 #cv2.imshow('After canny + filter', img)
 #cv2.waitKey(0)
