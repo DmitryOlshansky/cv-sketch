@@ -266,13 +266,13 @@ class LinesAccum(Accumulator):
 		if params[0] == float('inf'):
 			return params[1]
 		else:
-			return params[0], int(params[1])
+			return int(np.arctan(params[0])*180/np.pi)/self.tol, int(params[1])
 
 	def fit_curve(self, img, sample):
 		x1,y1 = sample[0]
 		x2,y2 = sample[1]
 		if x1 != x2: 
-			m = (y1 - y2)/(x1 - x2)
+			m = float(y1 - y2)/(x1 - x2)
 			b = y1 - x1 * m
 		else:
 			m = float('inf')
@@ -288,18 +288,18 @@ class LinesAccum(Accumulator):
 			return True
 		return False
 
-lines = LinesAccum(epouchs=45, iters=200, key_tolerance=2, min_curve=25)
+lines = LinesAccum(epouchs=45, iters=250, key_tolerance=5, curve_tolerance=1, min_curve=20)
 for m,b in lines(img):
 	if m != float('inf'):
 		cv2.line(original, (int(0), int(b)), (int(800), int(800*m+b)), (0, 255, 0))
 	else:
 		cv2.line(original, (int(b), 0), (int(b), int(600)), (0, 255, 0))
 
-circles = CirclesAccum(epouchs=10, iters=10000, key_tolerance=10, min_curve=10)
+circles = CirclesAccum(epouchs=10, iters=10000, key_tolerance=5, min_curve=10)
 for x,y,r in circles(img, lines.points):
 	cv2.circle(original, (int(x),int(y)), int(r), (255, 0, 0))
 
-ellipses = EllipseAccum(epouchs=8, iters=6000, key_tolerance=10, min_curve=10)
+ellipses = EllipseAccum(epouchs=8, iters=6000, key_tolerance=5, min_curve=10)
 # Use points filtered for lines
 for x,y,r1,r2,theta in ellipses(img, lines.points):
 	cv2.ellipse(original, (int(x),int(y)), (int(r1), int(r2)), theta, 0, 360, (0, 0, 255))
