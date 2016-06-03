@@ -122,6 +122,8 @@ class Accumulator:
 		for i in xrange(self.epouchs):
 			self.accum = {}
 			for j in xrange(self.iters):
+				if len(self.points) < self.sample_size:
+					break
 				sample = random.sample(self.points, self.sample_size)
 				curve = self.fit_curve(img, sample)
 				if curve: # None if failed to fit
@@ -213,7 +215,11 @@ class EllipseAccum(Accumulator):
 		x,y = p
 		x0,y0,a,b,theta = curve
 		# TODO: account for theta
-		if abs((x-x0)*(x-x0)/(a*a) + (y-y0)*(y-y0)/(b*b) - 1.0) < self.on_curve_tol:
+		x -= x0
+		y -= y0
+		th = theta*np.pi/180
+		x,y = x*np.cos(th) + y*np.sin(th), -x*np.sin(th) + y*np.cos(th)
+		if abs(x*x/(a*a) + y*y/(b*b) - 1.0) < self.on_curve_tol:
 			return True
 		return False
 
@@ -299,7 +305,7 @@ circles = CirclesAccum(epouchs=10, iters=10000, key_tolerance=5, min_curve=10)
 for x,y,r in circles(img, lines.points):
 	cv2.circle(original, (int(x),int(y)), int(r), (255, 0, 0))
 
-ellipses = EllipseAccum(epouchs=8, iters=6000, key_tolerance=5, min_curve=10)
+ellipses = EllipseAccum(epouchs=8, iters=6000, key_tolerance=5, curve_tolerance=0.05, min_curve=10)
 # Use points filtered for lines
 for x,y,r1,r2,theta in ellipses(img, lines.points):
 	cv2.ellipse(original, (int(x),int(y)), (int(r1), int(r2)), theta, 0, 360, (0, 0, 255))
